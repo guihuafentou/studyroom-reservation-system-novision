@@ -123,6 +123,53 @@ CREATE TABLE admin_audit_log (
     KEY idx_admin (admin_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='管理员操作审计表';
 
+-- ---------- 公告表 ----------
+DROP TABLE IF EXISTS announcement;
+CREATE TABLE announcement (
+    id          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '公告ID',
+    title       VARCHAR(100) NOT NULL COMMENT '公告标题',
+    content     TEXT         NOT NULL COMMENT '公告内容',
+    is_top      TINYINT      NOT NULL DEFAULT 0 COMMENT '是否置顶:0否 1是',
+    status      TINYINT      NOT NULL DEFAULT 1 COMMENT '状态:0下架 1发布',
+    create_by   BIGINT       DEFAULT NULL COMMENT '发布管理员',
+    create_time DATETIME     NOT NULL COMMENT '发布时间',
+    update_time DATETIME     DEFAULT NULL COMMENT '更新时间',
+    PRIMARY KEY (id),
+    KEY idx_status_top (status, is_top, create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='公告表';
+
+-- ---------- 系统参数表 ----------
+DROP TABLE IF EXISTS sys_config;
+CREATE TABLE sys_config (
+    id          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '参数ID',
+    config_key  VARCHAR(50)  NOT NULL COMMENT '参数键',
+    config_value VARCHAR(200) NOT NULL COMMENT '参数值',
+    description VARCHAR(200) DEFAULT NULL COMMENT '参数说明',
+    update_time DATETIME     DEFAULT NULL COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_config_key (config_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统参数表';
+
+-- ---------- 候补队列表 ----------
+DROP TABLE IF EXISTS waiting_queue;
+CREATE TABLE waiting_queue (
+    id             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '候补ID',
+    user_id        BIGINT       NOT NULL COMMENT '候补用户',
+    seat_id        BIGINT       NOT NULL COMMENT '目标座位',
+    room_id        BIGINT       NOT NULL COMMENT '所属自习室',
+    slot_id        BIGINT       DEFAULT NULL COMMENT '离散时段ID(弹性为NULL)',
+    reserve_date   DATE         NOT NULL COMMENT '预约日期',
+    start_time     DATETIME     NOT NULL COMMENT '开始时间',
+    end_time       DATETIME     NOT NULL COMMENT '结束时间',
+    status         TINYINT      NOT NULL DEFAULT 0 COMMENT '状态:0候补中 1已转正 2已放弃 3已过期',
+    create_time    DATETIME     NOT NULL COMMENT '加入时间',
+    promote_time   DATETIME     DEFAULT NULL COMMENT '转正时间',
+    reservation_id BIGINT       DEFAULT NULL COMMENT '转正生成的预约ID',
+    PRIMARY KEY (id),
+    KEY idx_seat_time (seat_id, reserve_date, status, create_time),
+    KEY idx_user (user_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='候补队列表';
+
 -- ============================================================
 -- 初始化数据
 -- ============================================================
@@ -159,6 +206,17 @@ INSERT INTO slot (room_id, start_time, end_time)
 WITH RECURSIVE seq AS (SELECT 0 AS n UNION ALL SELECT n+1 FROM seq WHERE n < 27)
 SELECT 2, SEC_TO_TIME(8*3600 + n*1800), SEC_TO_TIME(8*3600 + (n+1)*1800)
 FROM seq WHERE 8*3600 + (n+1)*1800 <= 22*3600;
+
+-- 系统参数默认值(与管理后台"参数配置"联动;修改参数表后即时生效,无需改代码/重启)
+INSERT INTO sys_config (config_key, config_value, description) VALUES
+('cancel_before_minutes', '30',  '取消截止:预约开始前N分钟不可取消'),
+('sign_before_minutes', '15',    '签到宽限:预约开始前N分钟起可签到'),
+('sign_after_minutes', '30',     '离散补签窗口:预约开始后N分钟内可补签'),
+('violate_limit', '3',           '违约满N次暂停预约权限'),
+('ban_days', '7',                '暂停预约天数'),
+('min_flex_minutes', '30',       '弹性预约最短时长(分钟)'),
+('max_flex_hours', '8',          '弹性预约单次最长(小时)'),
+('flex_no_sign_cancel_minutes', '60', '弹性预约开始后N分钟未签到自动取消');
 
 -- ============================================================
 -- 说明

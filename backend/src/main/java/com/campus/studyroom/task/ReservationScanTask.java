@@ -8,6 +8,7 @@ import com.campus.studyroom.entity.User;
 import com.campus.studyroom.mapper.ReservationMapper;
 import com.campus.studyroom.mapper.SlotMapper;
 import com.campus.studyroom.mapper.UserMapper;
+import com.campus.studyroom.service.WaitingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +36,7 @@ public class ReservationScanTask {
     private final ReservationMapper reservationMapper;
     private final SlotMapper slotMapper;
     private final UserMapper userMapper;
+    private final WaitingService waitingService;
 
     @Value("${studyroom.rule.violate-after-minutes:30}")
     private int violateAfterMinutes;
@@ -56,6 +58,7 @@ public class ReservationScanTask {
         runSafe("超时违约判定", () -> handleTimeoutViolations(now));
         runSafe("弹性超时取消", () -> handleFlexTimeoutCancel(now));
         runSafe("完成状态收尾", () -> handleFinished(now));
+        runSafe("候补过期清理", () -> waitingService.expireOutdated());
     }
 
     private void runSafe(String name, Runnable action) {
@@ -82,6 +85,7 @@ public class ReservationScanTask {
             if (conditionalUpdate(r.getId(), Reservation.STATUS_PENDING, Reservation.STATUS_CANCELED)) {
                 log.info("弹性预约 {} 开始后 {} 分钟未签到，自动取消并释放座位",
                         r.getId(), flexNoSignCancelMinutes);
+                waitingService.tryPromoteForReservation(r);
             }
         }
     }
@@ -107,6 +111,7 @@ public class ReservationScanTask {
             if (r.getReserveDate() != null && r.getReserveDate().isBefore(LocalDate.now())) {
                 if (conditionalUpdate(r.getId(), Reservation.STATUS_PENDING, Reservation.STATUS_CANCELED)) {
                     log.info("昨日预约 {} 仍未签到，取消释放（不计违约）", r.getId());
+                    waitingService.tryPromoteForReservation(r);
                 }
                 continue;
             }

@@ -29,8 +29,10 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * 预约服务：
@@ -52,6 +54,7 @@ public class ReservationService {
     private final SlotMapper slotMapper;
     private final UserMapper userMapper;
     private final SeatSseService seatSseService;
+    private final WaitingService waitingService;
 
     @Value("${studyroom.rule.cancel-before-minutes:30}")
     private int cancelBeforeMinutes;
@@ -83,6 +86,42 @@ public class ReservationService {
     @Value("${studyroom.rule.close-time:22:00}")
     private String closeTime;
 
+    // ---- 系统参数可配置化（评审 #25：管理后台可改业务规则）----
+    // 规则读取统一走参数表 sys_config，表中缺失时回退 yml 默认值；管理员保存后即时生效
+    private final SysConfigService sysConfigService;
+
+    private int cfgCancelBefore() {
+        return sysConfigService.getInt("cancel_before_minutes", cancelBeforeMinutes);
+    }
+
+    private int cfgSignBefore() {
+        return sysConfigService.getInt("sign_before_minutes", signBeforeMinutes);
+    }
+
+    private int cfgSignAfter() {
+        return sysConfigService.getInt("sign_after_minutes", signAfterMinutes);
+    }
+
+    private int cfgViolateLimit() {
+        return sysConfigService.getInt("violate_limit", violateLimit);
+    }
+
+    private int cfgBanDays() {
+        return sysConfigService.getInt("ban_days", banDays);
+    }
+
+    private int cfgMinFlex() {
+        return sysConfigService.getInt("min_flex_minutes", minFlexMinutes);
+    }
+
+    private int cfgMaxFlexHours() {
+        return sysConfigService.getInt("max_flex_hours", maxFlexHours);
+    }
+
+    private int cfgFlexNoSignCancel() {
+        return sysConfigService.getInt("flex_no_sign_cancel_minutes", flexNoSignCancelMinutes);
+    }
+
     /**
      * 创建预约：按自习室预约模式分流
      */
@@ -96,7 +135,7 @@ public class ReservationService {
             throw BusinessException.forbidden("账号状态异常，无法预约");
         }
         if (user.getBanUntil() != null && user.getBanUntil().isAfter(LocalDateTime.now())) {
-            throw BusinessException.forbidden("因违约累计达 " + violateLimit + " 次，预约权限暂停至 " + user.getBanUntil() + "，请届时再试");
+            throw BusinessException.forbidden("因违约累计达 " + cfgViolateLimit() + " 次，预约权限暂停至 " + user.getBanUntil() + "，请届时再试");
         }
 
         // 2. 座位与自习室检查
@@ -150,12 +189,12 @@ public class ReservationService {
             throw BusinessException.badRequest("结束时间必须晚于开始时间");
         }
         long minutes = Duration.between(start, end).toMinutes();
-        if (minutes < minFlexMinutes) {
-            throw BusinessException.badRequest("最短预约时长 " + minFlexMinutes + " 分钟");
+        if (minutes < cfgMinFlex()) {
+            throw BusinessException.badRequest("最短预约时长 " + cfgMinFlex() + " 分钟");
         }
-        long maxMinutes = (long) maxFlexHours * 60;
+        long maxMinutes = (long) cfgMaxFlexHours() * 60;
         if (minutes > maxMinutes) {
-            throw BusinessException.badRequest("单次预约最长 " + maxFlexHours + " 小时（试点），如需更长请联系管理员");
+            throw BusinessException.badRequest("单次预约最长 " + cfgMaxFlexHours() + " 小时（试点），如需更长请联系管理员");
         }
         if (start.isBefore(now)) {
             throw BusinessException.badRequest("预约开始时间必须晚于当前时间");
@@ -343,13 +382,15 @@ public class ReservationService {
     // ---------------- 取消 / 签到 ----------------
 
     /**
-     * 取消预约：本人 + 待签到 + 开始前 cancelBeforeMinutes 以上（条件更新防竞态）
+     * 取消预约：本人 + 待签到 + 开始前 cancelBeforeMinutes 以上（条件更新防竞态）。
+     * 事务包裹：保证候补转正的持锁与原子性（评审 #26）
      */
+    @Transactional(rollbackFor = Exception.class)
     public void cancel(Long reservationId) {
         Reservation r = getOwnPending(reservationId);
         LocalDateTime start = getStartTime(r);
-        if (LocalDateTime.now().isAfter(start.minusMinutes(cancelBeforeMinutes))) {
-            throw BusinessException.badRequest("预约开始前 " + cancelBeforeMinutes + " 分钟内不可取消");
+        if (LocalDateTime.now().isAfter(start.minusMinutes(cfgCancelBefore()))) {
+            throw BusinessException.badRequest("预约开始前 " + cfgCancelBefore() + " 分钟内不可取消");
         }
         int rows = reservationMapper.update(null,
                 new LambdaUpdateWrapper<Reservation>()
@@ -361,6 +402,8 @@ public class ReservationService {
         }
         r.setStatus(Reservation.STATUS_CANCELED);
         broadcast(r, "CANCELED");
+        // 候补转正：取消释放时段后按入队顺序自动补位（评审 #26）
+        waitingService.tryPromoteForReservation(r);
     }
 
     /**
@@ -372,11 +415,11 @@ public class ReservationService {
         LocalDateTime now = LocalDateTime.now();
         // 弹性预约：补签窗口与自动取消阈值一致（flexNoSignCancelMinutes），
         // 避免"签不了但也不取消"的死区；离散预约：沿用 sign-after-minutes（违约判定前的可补签窗口）
-        int signAfter = r.getStartTime() != null ? flexNoSignCancelMinutes : signAfterMinutes;
-        boolean inWindow = !now.isBefore(start.minusMinutes(signBeforeMinutes))
+        int signAfter = r.getStartTime() != null ? cfgFlexNoSignCancel() : cfgSignAfter();
+        boolean inWindow = !now.isBefore(start.minusMinutes(cfgSignBefore()))
                 && !now.isAfter(start.plusMinutes(signAfter));
         if (!inWindow) {
-            throw BusinessException.badRequest("不在签到时间窗口内（预约开始前 " + signBeforeMinutes
+            throw BusinessException.badRequest("不在签到时间窗口内（预约开始前 " + cfgSignBefore()
                     + " 分钟至开始后 " + signAfter + " 分钟）");
         }
         int rows = reservationMapper.update(null,
@@ -449,8 +492,96 @@ public class ReservationService {
     }
 
     /**
-     * 组装视图：房间/座位/区间信息 + 可操作标记
+     * 学习时长统计（评审 #27）：按已签到/已完成/提前结束的记录聚合，
+     * 弹性用 startTime~endTime，离散用 reserveDate + slot 时段，单位分钟。
      */
+    public Map<String, Object> studyStats() {
+        Long userId = UserContext.getUserId();
+        List<Reservation> list = reservationMapper.selectList(new LambdaQueryWrapper<Reservation>()
+                .eq(Reservation::getUserId, userId)
+                .in(Reservation::getStatus, Reservation.STATUS_SIGNED, Reservation.STATUS_FINISHED,
+                        Reservation.STATUS_EARLY_END));
+        LocalDate now = LocalDate.now();
+        LocalDate weekStart = now.minusDays(now.getDayOfWeek().getValue() - 1L);
+        LocalDate monthStart = now.withDayOfMonth(1);
+        long today = 0, week = 0, month = 0, total = 0;
+        Map<LocalDate, Long> daily = new TreeMap<>();
+        for (Reservation r : list) {
+            LocalDateTime s = startOfQuiet(r);
+            LocalDateTime e = endOfQuiet(r);
+            if (s == null || e == null || !e.isAfter(s)) {
+                continue;
+            }
+            // 进行中的已签到预约只统计到当前时刻，避免高估（评审 #27 复核意见 M3）
+            if (r.getStatus() == Reservation.STATUS_SIGNED && e.isAfter(LocalDateTime.now())) {
+                e = LocalDateTime.now();
+            }
+            long mins = Duration.between(s, e).toMinutes();
+            LocalDate d = r.getReserveDate();
+            total += mins;
+            if (d.equals(now)) {
+                today += mins;
+            }
+            if (!d.isBefore(weekStart)) {
+                week += mins;
+            }
+            if (!d.isBefore(monthStart)) {
+                month += mins;
+            }
+            daily.merge(d, mins, Long::sum);
+        }
+        List<Map<String, Object>> dailyList = new ArrayList<>();
+        for (int i = 6; i >= 0; i--) {
+            LocalDate d = now.minusDays(i);
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("date", d);
+            item.put("minutes", daily.getOrDefault(d, 0L));
+            dailyList.add(item);
+        }
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("todayMinutes", today);
+        res.put("weekMinutes", week);
+        res.put("monthMinutes", month);
+        res.put("totalMinutes", total);
+        res.put("daily", dailyList);
+        return res;
+    }
+
+    /** 统计用容错取区间起点（与业务取法一致但不抛业务异常） */
+    private LocalDateTime startOfQuiet(Reservation r) {
+        try {
+            if (r.getStartTime() != null) {
+                return r.getStartTime();
+            }
+            if (r.getSlotId() != null) {
+                Slot slot = slotMapper.selectById(r.getSlotId());
+                if (slot != null && r.getReserveDate() != null) {
+                    return LocalDateTime.of(r.getReserveDate(), slot.getStartTime());
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private LocalDateTime endOfQuiet(Reservation r) {
+        try {
+            if (r.getEndTime() != null) {
+                return r.getEndTime();
+            }
+            if (r.getSlotId() != null) {
+                Slot slot = slotMapper.selectById(r.getSlotId());
+                if (slot != null && r.getReserveDate() != null) {
+                    return LocalDateTime.of(r.getReserveDate(), slot.getEndTime());
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public ReservationVO toVO(Reservation r) {
         ReservationVO vo = new ReservationVO();
         vo.setId(r.getId());
@@ -483,9 +614,9 @@ public class ReservationService {
         }
         if (r.getStatus() == Reservation.STATUS_PENDING) {
             LocalDateTime start = getStartTime(r);
-            vo.setCancelExpired(LocalDateTime.now().isAfter(start.minusMinutes(cancelBeforeMinutes)));
-            int signAfter = r.getStartTime() != null ? flexNoSignCancelMinutes : signAfterMinutes;
-            boolean inWindow = !LocalDateTime.now().isBefore(start.minusMinutes(signBeforeMinutes))
+            vo.setCancelExpired(LocalDateTime.now().isAfter(start.minusMinutes(cfgCancelBefore())));
+            int signAfter = r.getStartTime() != null ? cfgFlexNoSignCancel() : cfgSignAfter();
+            boolean inWindow = !LocalDateTime.now().isBefore(start.minusMinutes(cfgSignBefore()))
                     && !LocalDateTime.now().isAfter(start.plusMinutes(signAfter));
             vo.setSignable(inWindow);
         }
@@ -508,6 +639,7 @@ public class ReservationService {
         try {
             Seat seat = seatMapper.selectById(r.getSeatId());
             if (seat != null) {
+                // 非视觉覆盖房间：取消/签到同步座位状态（评审 #22）
                 int target = switch (event) {
                     case "SIGNED" -> Seat.STATUS_IN_USE;
                     case "CANCELED" -> Seat.STATUS_FREE;

@@ -3,6 +3,7 @@ package com.campus.studyroom.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.campus.studyroom.common.Result;
 import com.campus.studyroom.entity.AdminAuditLog;
+import com.campus.studyroom.entity.Announcement;
 import com.campus.studyroom.entity.Room;
 import com.campus.studyroom.entity.Seat;
 import com.campus.studyroom.entity.Slot;
@@ -121,6 +122,53 @@ public class AdminController {
     public Result<Page<AdminAuditLog>> auditLogs(@RequestParam(defaultValue = "1") int page,
                                                  @RequestParam(defaultValue = "10") int size) {
         return Result.ok(adminService.listAuditLogs(page, size));
+    }
+
+    // ---------- 公告管理 ----------
+
+    @GetMapping("/announcements")
+    public Result<Page<Announcement>> announcements(@RequestParam(defaultValue = "1") int page,
+                                                    @RequestParam(defaultValue = "10") int size) {
+        return Result.ok(adminService.listAnnouncements(page, size));
+    }
+
+    @PostMapping("/announcements")
+    public Result<Announcement> addAnnouncement(@RequestBody Announcement announcement) {
+        announcement.setId(null);
+        return Result.ok(adminService.saveAnnouncement(announcement));
+    }
+
+    @PutMapping("/announcements")
+    public Result<Announcement> editAnnouncement(@RequestBody Announcement announcement) {
+        return Result.ok(adminService.saveAnnouncement(announcement));
+    }
+
+    @DeleteMapping("/announcements/{id}")
+    public Result<Void> deleteAnnouncement(@PathVariable Long id) {
+        adminService.deleteAnnouncement(id);
+        return Result.ok();
+    }
+
+    // ---------- 系统参数配置 ----------
+
+    @GetMapping("/configs")
+    public Result<java.util.List<com.campus.studyroom.entity.SysConfig>> configs() {
+        return Result.ok(adminService.listConfigs());
+    }
+
+    @PutMapping("/configs")
+    public Result<Void> saveConfigs(@RequestBody java.util.Map<String, String> configs) {
+        adminService.saveConfigs(configs);
+        return Result.ok();
+    }
+
+    // ---------- 候补队列 ----------
+
+    @GetMapping("/waiting")
+    public Result<Page<com.campus.studyroom.vo.WaitingQueueVO>> waiting(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return Result.ok(adminService.listWaiting(page, size));
     }
 
     // ---------- 统计报表 ----------

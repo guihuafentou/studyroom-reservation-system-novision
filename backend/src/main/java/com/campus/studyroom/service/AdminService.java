@@ -4,17 +4,23 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.campus.studyroom.common.BusinessException;
 import com.campus.studyroom.entity.AdminAuditLog;
+import com.campus.studyroom.entity.Announcement;
 import com.campus.studyroom.entity.Reservation;
 import com.campus.studyroom.entity.Room;
 import com.campus.studyroom.entity.Seat;
 import com.campus.studyroom.entity.Slot;
+import com.campus.studyroom.entity.SysConfig;
 import com.campus.studyroom.entity.User;
 import com.campus.studyroom.mapper.AdminAuditLogMapper;
+import com.campus.studyroom.mapper.AnnouncementMapper;
 import com.campus.studyroom.mapper.ReservationMapper;
 import com.campus.studyroom.mapper.RoomMapper;
 import com.campus.studyroom.mapper.SeatMapper;
 import com.campus.studyroom.mapper.SlotMapper;
+import com.campus.studyroom.mapper.SysConfigMapper;
 import com.campus.studyroom.mapper.UserMapper;
+import com.campus.studyroom.mapper.WaitingQueueMapper;
+import com.campus.studyroom.vo.WaitingQueueVO;
 import com.campus.studyroom.security.UserContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -40,6 +46,11 @@ public class AdminService {
     private final SlotMapper slotMapper;
     private final ReservationMapper reservationMapper;
     private final AdminAuditLogMapper auditLogMapper;
+    private final AnnouncementMapper announcementMapper;
+    private final SysConfigMapper sysConfigMapper;
+    private final SysConfigService sysConfigService;
+    private final WaitingQueueMapper waitingQueueMapper;
+    private final WaitingService waitingService;
 
     // ---------- 用户管理 ----------
 
@@ -191,6 +202,7 @@ public class AdminService {
         return result;
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public void forceCancel(Long reservationId) {
         Reservation r = reservationMapper.selectById(reservationId);
         if (r == null) {
@@ -199,6 +211,8 @@ public class AdminService {
         if (r.getStatus() == Reservation.STATUS_PENDING || r.getStatus() == Reservation.STATUS_SIGNED) {
             r.setStatus(Reservation.STATUS_CANCELED);
             reservationMapper.updateById(r);
+            // 强撤释放时段后触发候补转正（评审 #26）
+            waitingService.tryPromoteForReservation(r);
         }
         audit("FORCE_CANCEL", "reservation", reservationId, "强制取消预约");
     }
@@ -208,6 +222,80 @@ public class AdminService {
                 new LambdaQueryWrapper<AdminAuditLog>().orderByDesc(AdminAuditLog::getCreateTime));
     }
 
+    // ---------- 公告管理 ----------
+
+    public Page<Announcement> listAnnouncements(int page, int size) {
+        return announcementMapper.selectPage(new Page<>(page, size),
+                new LambdaQueryWrapper<Announcement>()
+                        .orderByDesc(Announcement::getIsTop)
+                        .orderByDesc(Announcement::getCreateTime));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Announcement saveAnnouncement(Announcement announcement) {
+        if (announcement.getTitle() == null || announcement.getTitle().isBlank()) {
+            throw BusinessException.badRequest("公告标题不能为空");
+        }
+        if (announcement.getContent() == null || announcement.getContent().isBlank()) {
+            throw BusinessException.badRequest("公告内容不能为空");
+        }
+        if (announcement.getIsTop() == null) {
+            announcement.setIsTop(0);
+        }
+        if (announcement.getStatus() == null) {
+            announcement.setStatus(Announcement.STATUS_ON);
+        }
+        if (announcement.getId() == null) {
+            announcement.setCreateBy(UserContext.getUserId());
+            announcement.setCreateTime(LocalDateTime.now());
+            announcement.setUpdateTime(LocalDateTime.now());
+            announcementMapper.insert(announcement);
+        } else {
+            announcement.setUpdateTime(LocalDateTime.now());
+            announcementMapper.updateById(announcement);
+        }
+        audit("ANNOUNCEMENT_EDIT", "announcement", announcement.getId(), announcement.getTitle());
+        return announcement;
+    }
+
+    public void deleteAnnouncement(Long id) {
+        announcementMapper.deleteById(id);
+        audit("ANNOUNCEMENT_DELETE", "announcement", id, "");
+    }
+
+    // ---------- 系统参数配置 ----------
+
+    public List<SysConfig> listConfigs() {
+        return sysConfigMapper.selectList(new LambdaQueryWrapper<SysConfig>()
+                .orderByAsc(SysConfig::getId));
+    }
+
+    public void saveConfigs(Map<String, String> configs) {
+        if (configs == null || configs.isEmpty()) {
+            throw BusinessException.badRequest("参数列表为空");
+        }
+        int n = 0;
+        for (Map.Entry<String, String> e : configs.entrySet()) {
+            String key = e.getKey();
+            String value = e.getValue();
+            if (key == null || key.isBlank()) {
+                continue;
+            }
+            if (value == null || value.isBlank()) {
+                throw BusinessException.badRequest("参数 " + key + " 的值不能为空");
+            }
+            sysConfigService.save(key.trim(), value.trim());
+            n++;
+        }
+        audit("SYS_CONFIG_EDIT", "config", null, "更新参数 " + n + " 项");
+    }
+
+    // ---------- 候补队列（管理端） ----------
+
+    public Page<WaitingQueueVO> listWaiting(int page, int size) {
+        return waitingService.listPage(page, size);
+    }
+
     // ---------- 审计 ----------
 
     private void audit(String action, String targetType, Long targetId, String detail) {
@@ -215,7 +303,8 @@ public class AdminService {
         log.setAdminId(UserContext.getUserId());
         log.setAction(action);
         log.setTargetType(targetType);
-        log.setTargetId(targetId);
+        // 部分操作无业务主键（如批量参数更新），target_id 非空约束下用 0 占位
+        log.setTargetId(targetId == null ? 0L : targetId);
         log.setDetail(detail);
         log.setCreateTime(LocalDateTime.now());
         auditLogMapper.insert(log);
