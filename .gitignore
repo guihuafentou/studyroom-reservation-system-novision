@@ -1,0 +1,35 @@
+# 后端构建产物
+backend/target/
+
+# 前端依赖与构建产物
+frontend/node_modules/
+frontend/dist/
+
+# 运行日志
+**/run*.log
+**/run-err.log
+
+# Python 缓存与虚拟环境
+vision-service/__pycache__/
+**/__pycache__/
+*.pyc
+vision-service/.venv/
+
+# IDE 配置
+.idea/
+.vscode/
+*.iml
+
+# 系统文件
+Thumbs.db
+.DS_Store
+
+# 本地环境配置
+*.local
+.env
+# 本地真实配置（可能含 API 密钥），只提交 config.example.json
+ai-bridge/config.json
+
+# 运行时生成的标定备份/临时文件
+vision-service/config.json.bak
+vision-service/config.json.tmp
