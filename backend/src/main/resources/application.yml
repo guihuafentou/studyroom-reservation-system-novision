@@ -1,0 +1,57 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: studyroom-backend
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/studyroom?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    # 数据库密码必须通过环境变量 MYSQL_PASSWORD 注入（代码无默认值）
+    password: ${MYSQL_PASSWORD}
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # 演示/生产建议关闭 SQL 日志，需要调试时取消下行注释
+    # log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+# 业务配置
+studyroom:
+  jwt:
+    # JWT 签名密钥必须通过环境变量 JWT_SECRET 注入（代码无默认值）
+    secret: ${JWT_SECRET}
+    expire-hours: 2
+  rule:
+    sign-before-minutes: 15        # 签到宽限：预约开始前
+    sign-after-minutes: 30         # 离散预约补签窗口：预约开始后（可补签）；弹性预约补签窗口 = flex-no-sign-cancel-minutes（60，与自动取消阈值一致）
+    violate-after-minutes: 30      # 超时未签到判违约
+    suspicious-after-minutes: 10   # 疑似占座阈值（违规占座告警）
+    alert-daily-limit: 50          # 违规告警当日推送上限（超限仅落库不推送，防告警风暴）
+    cancel-before-minutes: 30      # 取消截止：预约开始前
+    violate-limit: 3               # 违约满 N 次禁约
+    ban-days: 7                    # 禁约天数
+    # ---- 弹性预约（FLEXIBLE 试点室） ----
+    min-flex-minutes: 30           # 弹性预约最短时长（P1）
+    max-flex-hours: 8              # 弹性预约单次最长（试点默认 8h；放开至 72h 改此值）
+    flex-no-sign-cancel-minutes: 60 # 弹性预约开始后 N 分钟未签到 → 自动取消释放（不计违约）
+    open-time: 08:00               # 全局开馆时间兜底（P1，优先取 room.open_time）
+    close-time: 22:00              # 全局闭馆时间兜底（P1，优先取 room.close_time）
+    # ---- 登录防爆破（评审第 10 条） ----
+    login-max-fail: 5              # 连续登录失败 N 次锁定
+    login-lock-minutes: 15         # 锁定时长（分钟）
+  init-admin:
+    username: admin                # 首次启动自动创建的管理员账号
+    # 管理员初始密码必须通过环境变量 STUDYROOM_ADMIN_PASSWORD 注入（代码无默认值）
+    password: ${STUDYROOM_ADMIN_PASSWORD}
+
+logging:
+  level:
+    com.campus.studyroom: info
