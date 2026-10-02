@@ -5,6 +5,8 @@
       <el-menu mode="horizontal" :default-active="activeMenu" router class="nav-menu" :ellipsis="false">
         <el-menu-item index="/rooms">自习室</el-menu-item>
         <el-menu-item index="/my-reservations">我的预约</el-menu-item>
+        <el-menu-item index="/waiting">候补队列</el-menu-item>
+        <el-menu-item index="/announcements">公告</el-menu-item>
         <template v-if="userStore.isAdmin">
           <el-sub-menu index="/admin">
             <template #title>管理后台</template>
@@ -13,6 +15,9 @@
             <el-menu-item index="/admin/rooms">自习室管理</el-menu-item>
             <el-menu-item index="/admin/reservations">预约管理</el-menu-item>
             <el-menu-item index="/admin/audit">操作审计</el-menu-item>
+            <el-menu-item index="/admin/announcements">公告管理</el-menu-item>
+            <el-menu-item index="/admin/configs">参数配置</el-menu-item>
+            <el-menu-item index="/admin/waiting">候补队列</el-menu-item>
           </el-sub-menu>
         </template>
       </el-menu>

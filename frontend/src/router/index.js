@@ -12,12 +12,17 @@ const routes = [
       { path: 'rooms', name: 'Rooms', component: () => import('../views/RoomList.vue') },
       { path: 'rooms/:id', name: 'SeatMap', component: () => import('../views/SeatMap.vue') },
       { path: 'my-reservations', name: 'MyReservations', component: () => import('../views/MyReservations.vue') },
+      { path: 'waiting', name: 'Waiting', component: () => import('../views/WaitingList.vue') },
+      { path: 'announcements', name: 'Announcements', component: () => import('../views/Announcements.vue') },
       { path: 'admin', redirect: '/admin/dashboard', meta: { admin: true } },
       { path: 'admin/dashboard', name: 'AdminDashboard', component: () => import('../views/admin/AdminDashboard.vue'), meta: { admin: true } },
       { path: 'admin/users', name: 'AdminUsers', component: () => import('../views/admin/AdminUsers.vue'), meta: { admin: true } },
       { path: 'admin/rooms', name: 'AdminRooms', component: () => import('../views/admin/AdminRooms.vue'), meta: { admin: true } },
       { path: 'admin/reservations', name: 'AdminReservations', component: () => import('../views/admin/AdminReservations.vue'), meta: { admin: true } },
-      { path: 'admin/audit', name: 'AdminAudit', component: () => import('../views/admin/AdminAudit.vue'), meta: { admin: true } }
+      { path: 'admin/audit', name: 'AdminAudit', component: () => import('../views/admin/AdminAudit.vue'), meta: { admin: true } },
+      { path: 'admin/announcements', name: 'AdminAnnouncements', component: () => import('../views/admin/AdminAnnouncements.vue'), meta: { admin: true } },
+      { path: 'admin/configs', name: 'AdminConfigs', component: () => import('../views/admin/AdminConfigs.vue'), meta: { admin: true } },
+      { path: 'admin/waiting', name: 'AdminWaiting', component: () => import('../views/admin/AdminWaiting.vue'), meta: { admin: true } }
     ]
   },
   { path: '/:pathMatch(.*)*', redirect: '/rooms' }

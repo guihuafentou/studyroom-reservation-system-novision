@@ -35,3 +35,23 @@ export const adminGetAuditLogs = (params) => request.get('/admin/audit-logs', { 
 export const adminGetStatsOverview = () => request.get('/admin/stats/overview')
 export const adminGetStatsTrend = (params) => request.get('/admin/stats/trend', { params })
 export const adminGetStatsHeatmap = () => request.get('/admin/stats/heatmap')
+
+// ---------- 公告 ----------
+export const getAnnouncements = (params) => request.get('/announcements', { params })
+export const adminGetAnnouncements = (params) => request.get('/admin/announcements', { params })
+export const adminAddAnnouncement = (data) => request.post('/admin/announcements', data)
+export const adminEditAnnouncement = (data) => request.put('/admin/announcements', data)
+export const adminDeleteAnnouncement = (id) => request.delete(`/admin/announcements/${id}`)
+
+// ---------- 系统参数配置 ----------
+export const adminGetConfigs = () => request.get('/admin/configs')
+export const adminSaveConfigs = (data) => request.put('/admin/configs', data)
+
+// ---------- 候补队列 ----------
+export const waitingEnqueue = (data) => request.post('/waiting', data)
+export const getMyWaiting = () => request.get('/waiting/mine')
+export const waitingQuit = (id) => request.delete(`/waiting/${id}`)
+export const adminGetWaiting = (params) => request.get('/admin/waiting', { params })
+
+// ---------- 学习时长统计 ----------
+export const getStudyStats = () => request.get('/stats/study')
